@@ -15,7 +15,7 @@ Video/Audio → Audio Extraction → Transcription → Technical Scene Detection
 2. **Transcribe** — speech-to-text with timestamps (faster-whisper, runs locally, free)
 3. **Classify** — detect technical segments and group into scenes (Claude API)
 4. **Generate** — produce Mermaid or D2 diagram code per scene (Claude API)
-5. **Render** — render diagram code to PNG, then to a duration-matched video clip (mmdc / d2 / ffmpeg)
+5. **Render** — flowcharts are animated via Remotion (nodes spring into view, edges draw themselves); other diagram types render statically via mmdc / d2 / ffmpeg
 6. **Compose** — overlay diagram clips on the original video at exact timestamps (ffmpeg)
 
 ## Requirements
@@ -23,9 +23,11 @@ Video/Audio → Audio Extraction → Transcription → Technical Scene Detection
 ### System tools
 
 ```bash
-brew install ffmpeg d2 python@3.12
+brew install ffmpeg d2 python@3.12 node
 npm install -g @mermaid-js/mermaid-cli
 ```
+
+> **Note:** Node.js is required for [Remotion](https://www.remotion.dev/), which renders animated flowchart videos. npm dependencies inside `pipeline/remotion_render/` are installed automatically on the first run.
 
 ### Python environment
 

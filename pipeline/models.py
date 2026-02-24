@@ -33,3 +33,4 @@ class Diagram:
     code: str
     rendered_path: Optional[str] = None   # path to PNG/SVG after rendering
     video_path: Optional[str] = None      # path to duration-matched MP4 clip
+    graph_data: Optional[dict] = None     # parsed {nodes, edges} for Remotion animation
