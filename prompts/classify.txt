@@ -1,20 +1,26 @@
-You are analyzing a timestamped transcript to identify segments that contain technical or engineering content that would benefit from a visual diagram or workflow illustration.
+You are analyzing a timestamped transcript to identify segments that would benefit from a visual diagram or illustration.
 
-For each segment of the transcript below, determine:
-1. Whether it contains technical content worth visualizing
-2. If yes, what TYPE of diagram best represents it
+Cast a WIDE net. Include any segment that mentions or discusses:
+- Systems, databases, APIs, services, or infrastructure (even critically — e.g. "their database design is flawed because...")
+- Processes, workflows, algorithms, or sequences of steps
+- Data models, schemas, or entity relationships
+- Architecture decisions, design patterns, or technical trade-offs
+- How components, services, or people interact
+- Technical concepts being explained or compared
+
+The speaker does NOT need to be giving a tutorial. A critique, analysis, or casual discussion of a technical system is equally valid — a diagram showing what they're describing helps the viewer understand it.
 
 Diagram types:
-- flowchart: step-by-step process, decision trees, algorithms
-- sequence: interactions between systems/services/people over time
-- architecture: system components and how they connect
+- flowchart: processes, algorithms, decision trees, step-by-step flows
+- sequence: interactions between systems/services/users over time (API calls, request/response, etc.)
+- architecture: system components and how they connect (good for database design, service topology, infra)
 - state: state machines, lifecycle diagrams
-- er: data models, database schemas, entity relationships
+- er: data models, database schemas, entity relationships, table structures
 - class: object-oriented design, class hierarchies
 
-Group CONSECUTIVE related segments into a single "scene" (a continuous block of explanation about one topic).
+Group CONSECUTIVE related segments into a single "scene" (a continuous block about one topic). Scenes can be 10–120 seconds long.
 
-Respond with a JSON array of scenes. Only include scenes with technical content. Non-technical segments should be omitted.
+Respond with a JSON array of scenes. If there is truly nothing technical at all, return an empty array [].
 
 Schema:
 [
@@ -23,7 +29,7 @@ Schema:
     "end": <float, seconds>,
     "segment_indices": [<int>, ...],
     "content_type": "<one of the types above>",
-    "description": "<one sentence: what this scene is explaining>"
+    "description": "<one sentence: what technical concept this scene is describing>"
   }
 ]
 

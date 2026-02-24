@@ -13,6 +13,7 @@ from .extract import extract_audio
 from .transcribe import transcribe, segments_to_text
 from .classify import classify_scenes
 from .generate import generate_diagrams
+from .models import Diagram
 from .render import render_diagrams
 from .compose import compose_video
 
@@ -100,21 +101,44 @@ def run(args: argparse.Namespace) -> None:
         return
 
     # ── Stage 4: Generate diagram code ─────────────────────────────────────
-    _console.print("[cyan][4/6] Generating diagram code...[/]")
-    diagrams = generate_diagrams(scenes)
-
-    # Save generated code for inspection
     diagrams_dir = work_dir / "diagrams"
     diagrams_dir.mkdir(exist_ok=True)
-    for i, d in enumerate(diagrams):
-        ext = "mmd" if d.diagram_dsl == "mermaid" else "d2"
-        code_path = diagrams_dir / f"diagram_{i:03d}.{ext}"
-        code_path.write_text(d.code)
-    _console.print(f"[green]✓[/] [bold][4/6][/] Diagram generation complete ({len(diagrams)}/{len(scenes)} succeeded)")
+    diagrams_cache = work_dir / "diagrams.json"
+
+    if args.use_cache and diagrams_cache.exists():
+        with _console.status("[cyan][4/6] Loading cached diagrams...[/]"):
+            raw = json.loads(diagrams_cache.read_text())
+            diagrams = []
+            for entry in raw:
+                scene = scenes[entry["scene_index"]]
+                code_path = diagrams_dir / entry["code_file"]
+                diagrams.append(Diagram(
+                    scene=scene,
+                    diagram_dsl=entry["dsl"],
+                    code=code_path.read_text() if code_path.exists() else entry["code"],
+                ))
+        _console.print(f"[green]✓[/] [bold][4/6][/] Diagrams loaded from cache ({len(diagrams)} diagrams)")
+    else:
+        _console.print("[cyan][4/6] Generating diagram code...[/]")
+        diagrams = generate_diagrams(scenes)
+        cache_entries = []
+        for i, d in enumerate(diagrams):
+            ext = "mmd" if d.diagram_dsl == "mermaid" else "d2"
+            code_file = f"diagram_{i:03d}.{ext}"
+            (diagrams_dir / code_file).write_text(d.code)
+            cache_entries.append({
+                "scene_index": scenes.index(d.scene),
+                "dsl": d.diagram_dsl,
+                "code_file": code_file,
+                "code": d.code,
+            })
+        diagrams_cache.write_text(json.dumps(cache_entries, indent=2))
+        _console.print(f"[green]✓[/] [bold][4/6][/] Diagram generation complete ({len(diagrams)}/{len(scenes)} succeeded)")
 
     # ── Stage 5: Render diagrams ────────────────────────────────────────────
     _console.print("[cyan][5/6] Rendering diagrams...[/]")
-    diagrams = render_diagrams(diagrams, str(diagrams_dir))
+    diagrams = render_diagrams(diagrams, str(diagrams_dir), use_cache=args.use_cache)
+
     rendered = [d for d in diagrams if d.video_path]
     _console.print(f"[green]✓[/] [bold][5/6][/] Rendering complete ({len(rendered)}/{len(diagrams)} succeeded)")
 

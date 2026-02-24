@@ -107,36 +107,38 @@ def _compose_pip(source_video: str, diagrams: list[Diagram], output_path: str) -
 
 def _compose_side_by_side(source_video: str, diagrams: list[Diagram], output_path: str) -> str:
     """
-    Show source on left (50%), diagram on right (50%) during each scene window.
-    Outside diagram windows, source is shown full-width.
+    Show source full-width normally; during each scene overlay diagram on right half.
+    Source stays visible on left 50%, diagram appears on right 50%.
     """
     inputs = ["-i", source_video]
     for d in diagrams:
         inputs += ["-i", d.video_path]
 
     filter_parts = []
-    # Scale source to half width
-    filter_parts.append("[0:v]scale=960:1080[src_scaled]")
 
-    prev = "[src_scaled]"
+    # Base: source scaled to 1280x720 (match source resolution)
+    filter_parts.append(
+        "[0:v]scale=1280:720:force_original_aspect_ratio=decrease,"
+        "pad=1280:720:(ow-iw)/2:(oh-ih)/2:color=black[base0]"
+    )
+
+    prev = "[base0]"
 
     for i, diagram in enumerate(diagrams):
         start = diagram.scene.start
         end = diagram.scene.end
-        diag_label = f"[diag{i}_scaled]"
-        filter_parts.append(f"[{i+1}:v]scale=960:1080{diag_label}")
+
+        # Scale diagram to right half (640x720), white background
+        filter_parts.append(
+            f"[{i+1}:v]scale=640:720:force_original_aspect_ratio=decrease,"
+            f"pad=640:720:(ow-iw)/2:(oh-ih)/2:color=white[d{i}]"
+        )
 
         out_label = f"[v{i}]" if i < len(diagrams) - 1 else "[vout]"
-        # hstack left+right, but only during the scene window
-        # Outside the window, pad the source to full 1920 width
-        # Use overlay at x=960 during the window
+        # Overlay diagram on right half only during the scene window
+        # Outside the window the overlay is disabled — full source shows
         filter_parts.append(
-            f"[0:v]scale=1920:1080[fullsrc{i}]"
-        )
-        filter_parts.append(
-            f"[fullsrc{i}]{diag_label}overlay=960:0"
-            f":enable='between(t,{start},{end})'"
-            f"{out_label}"
+            f"{prev}[d{i}]overlay=640:0:enable='between(t,{start},{end})'{out_label}"
         )
         prev = f"[v{i}]"
 

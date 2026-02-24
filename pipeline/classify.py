@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 from pathlib import Path
 
 import anthropic
@@ -12,6 +13,33 @@ _PROMPT_PATH = Path(__file__).parent.parent / "prompts" / "classify.txt"
 _PROMPT_TEMPLATE = _PROMPT_PATH.read_text()
 
 _MODEL = "claude-sonnet-4-6"
+
+
+def _extract_json(text: str) -> list | None:
+    """Extract a JSON array from Claude's response, tolerating surrounding prose or fences."""
+    # 1. Try parsing the whole response directly
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+
+    # 2. Extract content inside ```...``` fences
+    fenced = re.search(r"```(?:json)?\s*([\s\S]*?)```", text)
+    if fenced:
+        try:
+            return json.loads(fenced.group(1).strip())
+        except json.JSONDecodeError:
+            pass
+
+    # 3. Find the first [...] array in the response
+    match = re.search(r"\[[\s\S]*\]", text)
+    if match:
+        try:
+            return json.loads(match.group(0))
+        except json.JSONDecodeError:
+            pass
+
+    return None
 
 
 def classify_scenes(segments: list[TranscriptSegment]) -> list[TechnicalScene]:
@@ -39,13 +67,10 @@ def classify_scenes(segments: list[TranscriptSegment]) -> list[TechnicalScene]:
 
     raw = message.content[0].text.strip()
 
-    # Strip markdown fences if Claude wrapped the JSON
-    if raw.startswith("```"):
-        raw = raw.split("```")[1]
-        if raw.startswith("json"):
-            raw = raw[4:]
-
-    scenes_data = json.loads(raw)
+    scenes_data = _extract_json(raw)
+    if scenes_data is None:
+        print(f"[classify] Could not parse Claude response as JSON. Raw response:\n{raw}")
+        return []
 
     scenes: list[TechnicalScene] = []
     for s in scenes_data:
