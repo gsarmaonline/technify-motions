@@ -14,8 +14,8 @@ Video/Audio → Audio Extraction → Transcription → Technical Scene Detection
 1. **Extract** — strip audio from video, normalize to 16kHz mono WAV (ffmpeg)
 2. **Transcribe** — speech-to-text with timestamps (faster-whisper, runs locally, free)
 3. **Classify** — detect technical segments and group into scenes (Claude API)
-4. **Generate** — for flowchart/architecture scenes the LLM outputs `{nodes, edges}` JSON directly; for other types it outputs Mermaid syntax (Claude API)
-5. **Render** — flowcharts and architecture diagrams are animated via Remotion (nodes spring into view, edges draw themselves); other diagram types render statically via mmdc / d2 / ffmpeg
+4. **Generate** — the LLM outputs `{nodes, edges}` JSON for every scene type (Claude API)
+5. **Render** — all diagrams are animated via Remotion (nodes spring into view, edges draw themselves)
 6. **Compose** — overlay diagram clips on the original video at exact timestamps (ffmpeg)
 
 ## Requirements
@@ -23,11 +23,10 @@ Video/Audio → Audio Extraction → Transcription → Technical Scene Detection
 ### System tools
 
 ```bash
-brew install ffmpeg d2 python@3.12 node
-npm install -g @mermaid-js/mermaid-cli   # only needed for sequence/state/ER/class diagrams
+brew install ffmpeg python@3.12 node
 ```
 
-> **Note:** Node.js is required for [Remotion](https://www.remotion.dev/), which renders animated flowchart and architecture videos. npm dependencies inside `pipeline/remotion_render/` are installed automatically on the first run.
+> **Note:** Node.js is required for [Remotion](https://www.remotion.dev/), which renders all animated diagram videos. npm dependencies inside `pipeline/remotion_render/` are installed automatically on the first run.
 
 ### Python environment
 
@@ -89,7 +88,7 @@ Intermediate files (transcript JSON, scene JSON, diagram code, rendered PNGs) ar
 |---|---|
 | Flowcharts, algorithms, decision trees | Remotion (animated) |
 | System/infrastructure architecture | Remotion (animated) |
-| Service interactions, API flows | Mermaid (sequence) |
-| State machines, lifecycles | Mermaid (state) |
-| Data models, database schemas | Mermaid (ER) |
-| Class hierarchies | Mermaid (class) |
+| Service interactions, API flows | Remotion (animated) |
+| State machines, lifecycles | Remotion (animated) |
+| Data models, database schemas | Remotion (animated) |
+| Class hierarchies | Remotion (animated) |
