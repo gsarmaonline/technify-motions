@@ -6,6 +6,7 @@ import tempfile
 from pathlib import Path
 
 import anthropic
+from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, MofNCompleteColumn
 
 from .models import TechnicalScene, Diagram
 
@@ -31,11 +32,23 @@ def generate_diagrams(scenes: list[TechnicalScene]) -> list[Diagram]:
     client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
     diagrams: list[Diagram] = []
 
-    for scene in scenes:
-        dsl = _CONTENT_TYPE_TO_DSL.get(scene.content_type, "mermaid")
-        diagram = _generate_with_retry(client, scene, dsl)
-        if diagram:
-            diagrams.append(diagram)
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        MofNCompleteColumn(),
+    ) as progress:
+        task = progress.add_task("[cyan]Generating diagrams...", total=len(scenes))
+        for scene in scenes:
+            progress.update(
+                task,
+                description=f"[cyan]Scene {scene.start:.1f}s–{scene.end:.1f}s ({scene.content_type})",
+            )
+            dsl = _CONTENT_TYPE_TO_DSL.get(scene.content_type, "mermaid")
+            diagram = _generate_with_retry(client, scene, dsl)
+            if diagram:
+                diagrams.append(diagram)
+            progress.advance(task)
 
     print(f"[generate] Generated {len(diagrams)}/{len(scenes)} diagrams successfully")
     return diagrams

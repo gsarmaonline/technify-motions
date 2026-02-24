@@ -1,6 +1,8 @@
 """Transcription with word-level timestamps using faster-whisper."""
 
 from faster_whisper import WhisperModel
+from rich.progress import Progress, SpinnerColumn, TextColumn
+
 from .models import TranscriptSegment
 
 
@@ -52,12 +54,22 @@ def transcribe(
     print(f"[transcribe] Detected language: {info.language} ({info.language_probability:.0%})")
 
     segments: list[TranscriptSegment] = []
-    for seg in segments_iter:
-        segments.append(TranscriptSegment(
-            start=seg.start,
-            end=seg.end,
-            text=seg.text.strip(),
-        ))
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        transient=True,
+    ) as progress:
+        task = progress.add_task("[cyan]Collecting segments: 0", total=None)
+        for seg in segments_iter:
+            segments.append(TranscriptSegment(
+                start=seg.start,
+                end=seg.end,
+                text=seg.text.strip(),
+            ))
+            progress.update(
+                task,
+                description=f"[cyan]Collecting segments: {len(segments)} [{seg.end:.1f}s]",
+            )
 
     print(f"[transcribe] {len(segments)} segments extracted")
     return segments
