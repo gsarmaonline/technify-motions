@@ -50,10 +50,17 @@ def render_diagrams(diagrams: list[Diagram], output_dir: str, max_workers: int =
             mp4_path = output_dir / f"{stem}.mp4"
 
             if use_cache and mp4_path.exists():
-                diagram.rendered_path = str(png_path) if png_path.exists() else None
-                diagram.video_path = str(mp4_path)
-                progress.advance(task)
-                return
+                should_use_remotion = bool(diagram.graph_data and diagram.graph_data.get("nodes"))
+                # Remotion renders have no accompanying PNG; static renders do.
+                # If a PNG exists alongside the mp4, it was rendered statically and
+                # should be re-rendered with Remotion now that graph_data is available.
+                already_remotion = should_use_remotion and not png_path.exists()
+                if not should_use_remotion or already_remotion:
+                    diagram.rendered_path = str(png_path) if png_path.exists() else None
+                    diagram.video_path = str(mp4_path)
+                    progress.advance(task)
+                    return
+                # else: has graph_data but was previously rendered statically — fall through to re-render
 
             duration = diagram.scene.duration
 

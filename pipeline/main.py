@@ -112,10 +112,12 @@ def run(args: argparse.Namespace) -> None:
             for entry in raw:
                 scene = scenes[entry["scene_index"]]
                 code_path = diagrams_dir / entry["code_file"]
+                code = code_path.read_text() if code_path.exists() else entry["code"]
                 diagrams.append(Diagram(
                     scene=scene,
                     diagram_dsl=entry["dsl"],
-                    code=code_path.read_text() if code_path.exists() else entry["code"],
+                    code=code,
+                    graph_data=entry.get("graph_data"),
                 ))
         _console.print(f"[green]✓[/] [bold][4/6][/] Diagrams loaded from cache ({len(diagrams)} diagrams)")
     else:
@@ -123,15 +125,23 @@ def run(args: argparse.Namespace) -> None:
         diagrams = generate_diagrams(scenes)
         cache_entries = []
         for i, d in enumerate(diagrams):
-            ext = "mmd" if d.diagram_dsl == "mermaid" else "d2"
+            if d.diagram_dsl == "mermaid":
+                ext = "mmd"
+            elif d.diagram_dsl == "remotion":
+                ext = "json"
+            else:
+                ext = "d2"
             code_file = f"diagram_{i:03d}.{ext}"
             (diagrams_dir / code_file).write_text(d.code)
-            cache_entries.append({
+            entry: dict = {
                 "scene_index": scenes.index(d.scene),
                 "dsl": d.diagram_dsl,
                 "code_file": code_file,
                 "code": d.code,
-            })
+            }
+            if d.graph_data is not None:
+                entry["graph_data"] = d.graph_data
+            cache_entries.append(entry)
         diagrams_cache.write_text(json.dumps(cache_entries, indent=2))
         _console.print(f"[green]✓[/] [bold][4/6][/] Diagram generation complete ({len(diagrams)}/{len(scenes)} succeeded)")
 

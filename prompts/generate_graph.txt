@@ -1,0 +1,33 @@
+You are generating an animated flowchart to visually accompany a section of a technical video.
+
+The speaker said the following:
+---
+{transcript_text}
+---
+
+Generate a graph with nodes and directed edges that illustrates what is being described.
+
+Output ONLY a valid JSON object with this exact schema — no markdown fences, no explanation:
+{
+  "title": "Brief diagram title (5 words max)",
+  "nodes": [
+    {"id": "A", "label": "Node Label", "shape": "box"},
+    {"id": "B", "label": "Decision?",  "shape": "diamond"}
+  ],
+  "edges": [
+    {"from": "A", "to": "B", "label": "optional edge label"}
+  ]
+}
+
+Shape options:
+- "box"      — default rectangular node
+- "diamond"  — decisions / branches / conditions
+- "circle"   — start / end / terminal points
+- "rounded"  — processes / actions / steps
+
+Rules:
+- Node labels: max 5 words, concise
+- Edge labels: optional, 1-4 words only
+- 4–12 nodes total; omit trivial intermediate nodes
+- Only illustrate what the speaker explicitly described
+- All "from"/"to" values must match an existing node "id"
