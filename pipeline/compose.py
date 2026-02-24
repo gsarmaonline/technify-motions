@@ -55,6 +55,9 @@ def _compose_pip(source_video: str, diagrams: list[Diagram], output_path: str) -
     Overlay each diagram as a PIP in the bottom-right corner during its time window.
     Chains overlays sequentially using ffmpeg filter_complex.
     """
+    _, src_w, _ = _source_info(source_video)
+    pip_w = src_w * 2 // 5  # 40% of source width, rounded to even
+
     # Build filter_complex for chained overlays
     # Each diagram is overlaid on the result of the previous overlay
     inputs = ["-i", source_video]
@@ -67,9 +70,9 @@ def _compose_pip(source_video: str, diagrams: list[Diagram], output_path: str) -
     for i, diagram in enumerate(diagrams):
         start = diagram.start
         end = diagram.end
-        # Scale PIP to 40% of screen width, preserve aspect ratio
+        # Scale PIP to 40% of source width, preserve aspect ratio (round height to even)
         pip_label = f"[pip{i}]"
-        scale_filter = f"[{i+1}:v]scale=iw*0.4:-1{pip_label}"
+        scale_filter = f"[{i+1}:v]scale={pip_w}:-2{pip_label}"
         filter_parts.append(scale_filter)
 
         out_label = f"[v{i}]" if i < len(diagrams) - 1 else "[vout]"
@@ -106,22 +109,30 @@ def _compose_pip(source_video: str, diagrams: list[Diagram], output_path: str) -
     return output_path
 
 
-def _source_duration(source_video: str) -> float:
-    """Return the duration of a video file in seconds via ffprobe."""
+def _source_info(source_video: str) -> tuple[float, int, int]:
+    """Return (duration_s, width, height) of a video file via ffprobe."""
     result = subprocess.run(
-        ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_format", source_video],
+        ["ffprobe", "-v", "quiet", "-print_format", "json",
+         "-show_format", "-show_streams", source_video],
         capture_output=True, text=True, timeout=30,
     )
-    return float(json.loads(result.stdout)["format"]["duration"])
+    data = json.loads(result.stdout)
+    dur = float(data["format"]["duration"])
+    for s in data["streams"]:
+        if s.get("codec_type") == "video":
+            return dur, int(s["width"]), int(s["height"])
+    return dur, 1920, 1080  # fallback
 
 
 def _compose_side_by_side(source_video: str, diagrams: list[Diagram], output_path: str) -> str:
     """
     Segment-based side-by-side: gaps between diagrams are stream-copied (fast),
     only diagram windows are composited and re-encoded (source left, diagram right).
+    Output resolution matches the source video so all segments are concat-compatible.
     """
     diagrams = sorted(diagrams, key=lambda d: d.start)
-    source_dur = _source_duration(source_video)
+    source_dur, src_w, src_h = _source_info(source_video)
+    half_w = src_w // 2
 
     # Build timeline: list of (t_start, t_end, diagram_or_None)
     segments: list[tuple[float, float, Diagram | None]] = []
@@ -150,25 +161,28 @@ def _compose_side_by_side(source_video: str, diagrams: list[Diagram], output_pat
             clip_paths.append(clip)
 
             if diagram is None:
-                # No diagram — stream copy (no re-encode, very fast)
-                progress.update(task, description=f"[cyan]Copying segment {j+1}/{len(segments)} ({t_start:.0f}s–{t_end:.0f}s)")
+                # No diagram — re-encode source at source resolution.
+                # Stream copy would seek to the nearest keyframe, making each clip
+                # slightly longer than requested and breaking concat alignment.
+                progress.update(task, description=f"[cyan]Encoding segment {j+1}/{len(segments)} ({t_start:.0f}s–{t_end:.0f}s)")
                 subprocess.run(
                     ["ffmpeg", "-y",
-                     "-ss", str(t_start), "-to", str(t_end),
-                     "-i", source_video,
-                     "-c", "copy", clip],
+                     "-ss", str(t_start), "-to", str(t_end), "-i", source_video,
+                     "-c:v", "libx264", "-preset", "ultrafast", "-threads", "0",
+                     "-c:a", "aac", clip],
                     capture_output=True, check=True, timeout=600,
                 )
             else:
-                # Diagram window — composite source (left) + diagram (right)
+                # Diagram window — composite source (left) + diagram (right).
+                # Both panels are half_w × src_h so the output matches source resolution.
                 progress.update(task, description=f"[cyan]Compositing segment {j+1}/{len(segments)} ({t_start:.0f}s–{t_end:.0f}s)")
                 filter_complex = (
-                    "[0:v]scale=960:1080:force_original_aspect_ratio=decrease,"
-                    "pad=960:1080:(ow-iw)/2:(oh-ih)/2:color=black,"
-                    "pad=1920:1080:0:0:color=black[left];"
-                    "[1:v]scale=960:1080:force_original_aspect_ratio=decrease,"
-                    "pad=960:1080:(ow-iw)/2:(oh-ih)/2:color=white[right];"
-                    "[left][right]overlay=960:0[out]"
+                    f"[0:v]scale={half_w}:{src_h}:force_original_aspect_ratio=decrease,"
+                    f"pad={half_w}:{src_h}:(ow-iw)/2:(oh-ih)/2:color=black,"
+                    f"pad={src_w}:{src_h}:0:0:color=black[left];"
+                    f"[1:v]scale={half_w}:{src_h}:force_original_aspect_ratio=decrease,"
+                    f"pad={half_w}:{src_h}:(ow-iw)/2:(oh-ih)/2:color=white[right];"
+                    f"[left][right]overlay={half_w}:0[out]"
                 )
                 subprocess.run(
                     ["ffmpeg", "-y",
