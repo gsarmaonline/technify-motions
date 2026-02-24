@@ -39,6 +39,7 @@ work/
 
 # Remotion / Node
 pipeline/remotion_render/node_modules/
+pipeline/remotion_render/tmp*.json
 
 # Editor/IDE
 # .idea/
