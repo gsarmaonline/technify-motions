@@ -27,6 +27,15 @@ go.work.sum
 # env file
 .env
 
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Pipeline working directory
+work/
+
 # Editor/IDE
 # .idea/
 # .vscode/

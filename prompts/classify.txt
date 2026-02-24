@@ -1,0 +1,31 @@
+You are analyzing a timestamped transcript to identify segments that contain technical or engineering content that would benefit from a visual diagram or workflow illustration.
+
+For each segment of the transcript below, determine:
+1. Whether it contains technical content worth visualizing
+2. If yes, what TYPE of diagram best represents it
+
+Diagram types:
+- flowchart: step-by-step process, decision trees, algorithms
+- sequence: interactions between systems/services/people over time
+- architecture: system components and how they connect
+- state: state machines, lifecycle diagrams
+- er: data models, database schemas, entity relationships
+- class: object-oriented design, class hierarchies
+
+Group CONSECUTIVE related segments into a single "scene" (a continuous block of explanation about one topic).
+
+Respond with a JSON array of scenes. Only include scenes with technical content. Non-technical segments should be omitted.
+
+Schema:
+[
+  {
+    "start": <float, seconds>,
+    "end": <float, seconds>,
+    "segment_indices": [<int>, ...],
+    "content_type": "<one of the types above>",
+    "description": "<one sentence: what this scene is explaining>"
+  }
+]
+
+Transcript:
+{transcript}

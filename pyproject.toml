@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "technify-motions"
+version = "0.1.0"
+description = "Auto-generate synced diagram overlays for technical videos"
+requires-python = ">=3.11"
+dependencies = [
+    "faster-whisper>=1.0.0",
+    "anthropic>=0.40.0",
+    "ffmpeg-python>=0.2.0",
+]
+
+[project.scripts]
+technify = "pipeline.main:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["pipeline*"]

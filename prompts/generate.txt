@@ -1,0 +1,17 @@
+You are generating a diagram to visually accompany a section of a technical video/lecture.
+
+The speaker said the following:
+---
+{transcript_text}
+---
+
+Generate a {diagram_dsl} diagram that accurately illustrates what is being described.
+
+Requirements:
+- The diagram must be syntactically valid {diagram_dsl}
+- Keep it focused: only include what the speaker explicitly described
+- Use clear, concise labels
+- For Mermaid: start with the diagram type declaration (e.g. `flowchart TD`, `sequenceDiagram`, etc.)
+- For D2: use valid D2 syntax
+
+Respond with ONLY the raw diagram code, no explanation, no markdown fences.
