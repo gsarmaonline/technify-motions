@@ -107,20 +107,24 @@ def _compose_pip(source_video: str, diagrams: list[Diagram], output_path: str) -
 
 def _compose_side_by_side(source_video: str, diagrams: list[Diagram], output_path: str) -> str:
     """
-    True side-by-side: source on the left half, diagram on the right half.
-    Output canvas is 1920x1080. Outside a diagram window the right half is black.
+    Dynamic side-by-side: source is full-width by default; during each diagram
+    window it shrinks to the left 960px and the diagram fills the right 960px.
     """
+    n = len(diagrams)
     inputs = ["-i", source_video]
     for d in diagrams:
         inputs += ["-i", d.video_path]
 
     filter_parts = []
 
-    # Source: fit into left 960x1080, pad the full canvas to 1920x1080 (right half stays black)
+    # Split source into: one full-width base + one half-width copy per diagram
+    split_outs = "[fullsrc]" + "".join(f"[src{i}]" for i in range(n))
+    filter_parts.append(f"[0:v]split={n + 1}{split_outs}")
+
+    # Full-width base (shown outside diagram windows)
     filter_parts.append(
-        "[0:v]scale=960:1080:force_original_aspect_ratio=decrease,"
-        "pad=960:1080:(ow-iw)/2:(oh-ih)/2:color=black,"
-        "pad=1920:1080:0:0:color=black[base0]"
+        "[fullsrc]scale=1920:1080:force_original_aspect_ratio=decrease,"
+        "pad=1920:1080:(ow-iw)/2:(oh-ih)/2:color=black[base0]"
     )
 
     prev = "[base0]"
@@ -129,16 +133,26 @@ def _compose_side_by_side(source_video: str, diagrams: list[Diagram], output_pat
         start = diagram.scene.start
         end = diagram.scene.end
 
-        # Diagram: fit into right 960x1080, white background
+        # Source shrunk to left half, canvas padded to full 1920 width (right half black)
+        filter_parts.append(
+            f"[src{i}]scale=960:1080:force_original_aspect_ratio=decrease,"
+            f"pad=960:1080:(ow-iw)/2:(oh-ih)/2:color=black,"
+            f"pad=1920:1080:0:0:color=black[leftpanel{i}]"
+        )
+
+        # Diagram scaled to right half
         filter_parts.append(
             f"[{i+1}:v]scale=960:1080:force_original_aspect_ratio=decrease,"
             f"pad=960:1080:(ow-iw)/2:(oh-ih)/2:color=white[d{i}]"
         )
 
-        out_label = f"[v{i}]" if i < len(diagrams) - 1 else "[vout]"
-        # Place diagram on the right half (x=960) during its scene window
+        # Combine: diagram overlaid on the right half of the left-panel
+        filter_parts.append(f"[leftpanel{i}][d{i}]overlay=960:0[panel{i}]")
+
+        # Swap full-width base for the split panel only during this scene window
+        out_label = f"[v{i}]" if i < n - 1 else "[vout]"
         filter_parts.append(
-            f"{prev}[d{i}]overlay=960:0:enable='between(t,{start},{end})'{out_label}"
+            f"{prev}[panel{i}]overlay=0:0:enable='between(t,{start},{end})'{out_label}"
         )
         prev = f"[v{i}]"
 
