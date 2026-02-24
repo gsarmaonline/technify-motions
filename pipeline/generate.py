@@ -1,6 +1,7 @@
 """Generate diagram code from technical scenes using Claude."""
 
 import os
+import re
 import subprocess
 import tempfile
 from pathlib import Path
@@ -84,7 +85,10 @@ def _generate_with_retry(
 
         valid, error = _validate_diagram(dsl, code)
         if valid:
-            return Diagram(scene=scene, diagram_dsl=dsl, code=code)
+            graph_data = None
+            if dsl == "mermaid" and _is_flowchart(code):
+                graph_data = _parse_mermaid_to_graph(code)
+            return Diagram(scene=scene, diagram_dsl=dsl, code=code, graph_data=graph_data)
 
         last_error = error
         print(f"[generate] Validation failed (attempt {attempt}): {error}")
@@ -153,3 +157,92 @@ def _validate_d2(code: str) -> tuple[bool, str]:
     finally:
         Path(input_path).unlink(missing_ok=True)
         Path(output_path).unlink(missing_ok=True)
+
+
+# ── Mermaid flowchart → graph JSON ───────────────────────────────────────────
+
+_FLOWCHART_HEADER = re.compile(r"^\s*(flowchart|graph)\s+", re.IGNORECASE)
+
+# Lines to skip outright
+_SKIP_LINE = re.compile(
+    r"^\s*(?:%%|subgraph|end\s*$|style\s|classDef\s|class\s|click\s|linkStyle)",
+    re.IGNORECASE,
+)
+
+# Shapes: order matters — check longer patterns first
+_SHAPE_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r"^(\w+)\(\((.+)\)\)$", re.DOTALL), "circle"),      # A((label))
+    (re.compile(r"^(\w+)\(\[(.+)\]\)$", re.DOTALL), "box"),          # A([label])
+    (re.compile(r"^(\w+)\{(.+)\}$", re.DOTALL), "diamond"),          # A{label}
+    (re.compile(r"^(\w+)\[(.+)\]$", re.DOTALL), "box"),              # A[label]
+    (re.compile(r"^(\w+)\((.+)\)$", re.DOTALL), "rounded"),          # A(label)
+    (re.compile(r"^(\w+)$"), "box"),                                   # A
+]
+
+# Arrow separators (various Mermaid styles)
+_ARROW_RE = re.compile(r"\s*(?:-->|--[^>]*->|-\.->|==>|---)\s*")
+
+# Label inside arrow: -- some text -->
+_ARROW_LABEL_RE = re.compile(r"--([^>-]+)-->")
+
+
+def _is_flowchart(code: str) -> bool:
+    return bool(_FLOWCHART_HEADER.match(code))
+
+
+def _parse_node_token(token: str) -> tuple[str, str, str] | None:
+    """Return (id, label, shape) for a node token, or None if unrecognised."""
+    token = token.strip()
+    if not token:
+        return None
+    for pattern, shape in _SHAPE_PATTERNS:
+        m = pattern.match(token)
+        if m:
+            nid = m.group(1).strip()
+            label = m.group(2).strip() if pattern.groups >= 2 else nid  # type: ignore[attr-defined]
+            return nid, label, shape
+    return None
+
+
+def _parse_mermaid_to_graph(code: str) -> dict:
+    """
+    Parse a Mermaid flowchart into {nodes, edges} suitable for Remotion.
+    Handles: A --> B, A[x] --> B{y}, A -- label --> B, chained A-->B-->C.
+    """
+    nodes: dict[str, dict] = {}
+    edges: list[dict] = []
+
+    def ensure_node(token: str) -> str | None:
+        result = _parse_node_token(token)
+        if result:
+            nid, label, shape = result
+            if nid not in nodes:
+                nodes[nid] = {"id": nid, "label": label, "shape": shape}
+            return nid
+        return None
+
+    for raw_line in code.splitlines():
+        line = raw_line.strip()
+        if not line or _SKIP_LINE.match(line) or _FLOWCHART_HEADER.match(line):
+            continue
+
+        # Normalise |label| variant: A -->|yes| B  →  A -- yes --> B
+        line = re.sub(r"(-->|---)\s*\|([^|]*)\|", r"-- \2 -->", line)
+
+        # Split on any arrow to get node-token pieces
+        parts = _ARROW_RE.split(line)
+        if len(parts) < 2:
+            ensure_node(line)
+            continue
+
+        # Extract edge labels from the arrows between parts
+        arrow_labels = [m.group(1).strip("- ").strip() for m in _ARROW_LABEL_RE.finditer(line)]
+
+        node_ids: list[str | None] = [ensure_node(p) for p in parts]
+        for i in range(len(node_ids) - 1):
+            frm, to = node_ids[i], node_ids[i + 1]
+            if frm and to:
+                label = arrow_labels[i] if i < len(arrow_labels) else ""
+                edges.append({"from": frm, "to": to, "label": label})
+
+    return {"nodes": list(nodes.values()), "edges": edges}

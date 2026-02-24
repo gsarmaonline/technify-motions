@@ -1,5 +1,11 @@
-"""Render diagram code to PNG, then to a duration-matched video clip."""
+"""Render diagram code to PNG, then to a duration-matched video clip.
 
+Flowchart diagrams with parsed graph data are rendered via Remotion for a live
+"drawing" animation.  All other diagram types fall back to the original
+PNG → ffmpeg static-video path.
+"""
+
+import json
 import shutil
 import subprocess
 import tempfile
@@ -49,6 +55,23 @@ def render_diagrams(diagrams: list[Diagram], output_dir: str, max_workers: int =
                 progress.advance(task)
                 return
 
+            duration = diagram.scene.duration
+
+            # ── Try Remotion for flowcharts with parsed graph data ─────────
+            if diagram.graph_data and diagram.graph_data.get("nodes"):
+                progress.update(
+                    task,
+                    description=f"[cyan]Remotion {i+1}/{total} ({len(diagram.graph_data['nodes'])} nodes)",
+                )
+                ok = _render_with_remotion(diagram.graph_data, str(mp4_path), duration)
+                if ok:
+                    diagram.video_path = str(mp4_path)
+                    _log(f"[render] Diagram {i+1} animated via Remotion → {mp4_path.name} ({duration:.1f}s)")
+                    progress.advance(task)
+                    return
+                _log(f"[render] Remotion failed for diagram {i+1}, falling back to static render")
+
+            # ── Static PNG → video fallback ────────────────────────────────
             progress.update(task, description=f"[cyan]Rendering {i+1}/{total} ({diagram.diagram_dsl})")
 
             if diagram.diagram_dsl == "mermaid":
@@ -65,7 +88,6 @@ def render_diagrams(diagrams: list[Diagram], output_dir: str, max_workers: int =
 
             diagram.rendered_path = str(png_path)
 
-            duration = diagram.scene.duration
             ok = _png_to_video(str(png_path), str(mp4_path), duration)
             if ok:
                 diagram.video_path = str(mp4_path)
@@ -167,6 +189,103 @@ def _render_d2(code: str, output_png: str) -> bool:
         return False
     finally:
         Path(input_path).unlink(missing_ok=True)
+
+
+# ── Remotion renderer ─────────────────────────────────────────────────────────
+
+_REMOTION_DIR = Path(__file__).parent / "remotion_render"
+_remotion_deps_ready: bool = False
+_remotion_lock = threading.Lock()
+
+
+def _ensure_remotion_deps() -> bool:
+    """Install npm dependencies for the Remotion project (once per process)."""
+    global _remotion_deps_ready
+    with _remotion_lock:
+        if _remotion_deps_ready:
+            return True
+        node_modules = _REMOTION_DIR / "node_modules"
+        if node_modules.exists():
+            _remotion_deps_ready = True
+            return True
+        _log("[render] Installing Remotion dependencies (first run)…")
+        result = subprocess.run(
+            ["npm", "install", "--prefer-offline", "--no-audit", "--no-fund"],
+            cwd=str(_REMOTION_DIR),
+            capture_output=True,
+            text=True,
+            timeout=180,
+        )
+        if result.returncode != 0:
+            _log(f"[render] npm install failed:\n{result.stderr}")
+            return False
+        _remotion_deps_ready = True
+        return True
+
+
+def _render_with_remotion(graph_data: dict, output_mp4: str, duration: float) -> bool:
+    """
+    Render an animated flowchart video using Remotion.
+
+    Nodes spring-scale into view one by one (top-to-bottom, dagre order).
+    Edges are progressively drawn using SVG stroke-dashoffset.
+    Duration matches the scene exactly via Remotion's calculateMetadata.
+    """
+    if not _ensure_remotion_deps():
+        return False
+
+    remotion_bin = _REMOTION_DIR / "node_modules" / ".bin" / "remotion"
+    if not remotion_bin.exists():
+        _log("[render] remotion binary not found after npm install")
+        return False
+
+    props = {**graph_data, "durationSeconds": duration}
+    props_json = json.dumps(props)
+
+    # Write props to a temp file to avoid shell-length limits on large graphs
+    with tempfile.NamedTemporaryFile(
+        suffix=".json", mode="w", delete=False, dir=str(_REMOTION_DIR)
+    ) as pf:
+        pf.write(props_json)
+        props_file = pf.name
+
+    abs_output = str(Path(output_mp4).absolute())
+
+    try:
+        result = subprocess.run(
+            [
+                str(remotion_bin),
+                "render",
+                "src/index.ts",
+                "FlowchartAnimation",
+                abs_output,
+                f"--props={props_file}",
+                "--log=error",
+                "--concurrency=4",
+            ],
+            cwd=str(_REMOTION_DIR),
+            capture_output=True,
+            text=True,
+            timeout=360,
+        )
+        if result.returncode != 0:
+            _log(f"[render] Remotion render failed:\n{result.stderr[-2000:]}")
+            return False
+        if not Path(abs_output).exists():
+            _log("[render] Remotion exited 0 but output file missing")
+            return False
+        return True
+    except FileNotFoundError:
+        _log("[render] Node.js / remotion binary not found")
+        return False
+    except subprocess.TimeoutExpired:
+        _log("[render] Remotion render timed out")
+        return False
+    finally:
+        Path(props_file).unlink(missing_ok=True)
+
+
+# ── ffmpeg static fallback ────────────────────────────────────────────────────
 
 
 def _png_to_video(png_path: str, output_mp4: str, duration: float) -> bool:

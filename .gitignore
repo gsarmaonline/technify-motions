@@ -36,6 +36,9 @@ __pycache__/
 # Pipeline working directory
 work/
 
+# Remotion / Node
+pipeline/remotion_render/node_modules/
+
 # Editor/IDE
 # .idea/
 # .vscode/
