@@ -62,36 +62,32 @@ def render_diagrams(diagrams: list[Diagram], output_dir: str, max_workers: int =
                     return
                 # else: has graph_data but was previously rendered statically — fall through to re-render
 
-            duration = diagram.scene.duration
+            duration = diagram.duration
 
-            # ── Try Remotion for flowcharts with parsed graph data ─────────
-            if diagram.graph_data and diagram.graph_data.get("nodes"):
-                progress.update(
-                    task,
-                    description=f"[cyan]Remotion {i+1}/{total} ({len(diagram.graph_data['nodes'])} nodes)",
-                )
-                ok = _render_with_remotion(diagram.graph_data, str(mp4_path), duration)
-                if ok:
-                    diagram.video_path = str(mp4_path)
-                    _log(f"[render] Diagram {i+1} animated via Remotion → {mp4_path.name} ({duration:.1f}s)")
+            # ── Remotion render ────────────────────────────────────────────
+            slide_type = (diagram.graph_data or {}).get("type") or (
+                "graph" if (diagram.graph_data or {}).get("nodes") else None
+            )
+            if slide_type:
+                composition = _COMPOSITION_FOR_TYPE.get(slide_type)
+                if composition:
+                    progress.update(
+                        task,
+                        description=f"[cyan]Remotion {i+1}/{total} [{slide_type}] ({duration:.1f}s)",
+                    )
+                    ok = _render_with_remotion(diagram.graph_data, str(mp4_path), duration, composition)
+                    if ok:
+                        diagram.video_path = str(mp4_path)
+                        _log(f"[render] Slide {i+1} [{slide_type}] → {mp4_path.name} ({duration:.1f}s)")
+                        progress.advance(task)
+                        return
+                    _log(f"[render] Remotion failed for slide {i+1} [{slide_type}], skipping")
                     progress.advance(task)
                     return
-                _log(f"[render] Remotion failed for diagram {i+1}, falling back to static render")
 
-            # ── Static PNG → video fallback ────────────────────────────────
-            progress.update(task, description=f"[cyan]Rendering {i+1}/{total} ({diagram.diagram_dsl})")
-
-            if diagram.diagram_dsl == "mermaid":
-                ok = _render_mermaid(diagram.code, str(png_path))
-            elif diagram.diagram_dsl == "d2":
-                ok = _render_d2(diagram.code, str(png_path))
-            else:
-                ok = False
-
-            if not ok:
-                _log(f"[render] Failed to render diagram {i+1}, skipping")
-                progress.advance(task)
-                return
+            _log(f"[render] Slide {i+1} has no renderable type, skipping")
+            progress.advance(task)
+            return
 
             diagram.rendered_path = str(png_path)
 
@@ -200,6 +196,12 @@ def _render_d2(code: str, output_png: str) -> bool:
 
 # ── Remotion renderer ─────────────────────────────────────────────────────────
 
+_COMPOSITION_FOR_TYPE: dict[str, str] = {
+    "graph":   "FlowchartAnimation",
+    "bullets": "BulletsSlide",
+    "code":    "CodeSlide",
+}
+
 _REMOTION_DIR = Path(__file__).parent / "remotion_render"
 _remotion_deps_ready: bool = False
 _remotion_lock = threading.Lock()
@@ -230,14 +232,8 @@ def _ensure_remotion_deps() -> bool:
         return True
 
 
-def _render_with_remotion(graph_data: dict, output_mp4: str, duration: float) -> bool:
-    """
-    Render an animated flowchart video using Remotion.
-
-    Nodes spring-scale into view one by one (top-to-bottom, dagre order).
-    Edges are progressively drawn using SVG stroke-dashoffset.
-    Duration matches the scene exactly via Remotion's calculateMetadata.
-    """
+def _render_with_remotion(graph_data: dict, output_mp4: str, duration: float, composition: str = "FlowchartAnimation") -> bool:
+    """Render a slide using the specified Remotion composition."""
     if not _ensure_remotion_deps():
         return False
 
@@ -264,7 +260,7 @@ def _render_with_remotion(graph_data: dict, output_mp4: str, duration: float) ->
                 str(remotion_bin),
                 "render",
                 "src/index.ts",
-                "FlowchartAnimation",
+                composition,
                 abs_output,
                 f"--props={props_file}",
                 "--log=error",

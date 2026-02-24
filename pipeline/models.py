@@ -29,8 +29,22 @@ class TechnicalScene:
 @dataclass
 class Diagram:
     scene: TechnicalScene
-    diagram_dsl: str   # "mermaid" or "d2"
+    diagram_dsl: str   # "remotion"
     code: str
     rendered_path: Optional[str] = None   # path to PNG/SVG after rendering
     video_path: Optional[str] = None      # path to duration-matched MP4 clip
-    graph_data: Optional[dict] = None     # parsed {nodes, edges} for Remotion animation
+    graph_data: Optional[dict] = None     # slide payload for Remotion
+    slide_start: Optional[float] = None  # overrides scene.start when scene is split
+    slide_end: Optional[float] = None    # overrides scene.end when scene is split
+
+    @property
+    def start(self) -> float:
+        return self.slide_start if self.slide_start is not None else self.scene.start
+
+    @property
+    def end(self) -> float:
+        return self.slide_end if self.slide_end is not None else self.scene.end
+
+    @property
+    def duration(self) -> float:
+        return self.end - self.start

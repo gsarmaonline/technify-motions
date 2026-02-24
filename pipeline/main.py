@@ -118,6 +118,8 @@ def run(args: argparse.Namespace) -> None:
                     diagram_dsl=entry["dsl"],
                     code=code,
                     graph_data=entry.get("graph_data"),
+                    slide_start=entry.get("slide_start"),
+                    slide_end=entry.get("slide_end"),
                 ))
         _console.print(f"[green]✓[/] [bold][4/6][/] Diagrams loaded from cache ({len(diagrams)} diagrams)")
     else:
@@ -125,13 +127,7 @@ def run(args: argparse.Namespace) -> None:
         diagrams = generate_diagrams(scenes)
         cache_entries = []
         for i, d in enumerate(diagrams):
-            if d.diagram_dsl == "mermaid":
-                ext = "mmd"
-            elif d.diagram_dsl == "remotion":
-                ext = "json"
-            else:
-                ext = "d2"
-            code_file = f"diagram_{i:03d}.{ext}"
+            code_file = f"diagram_{i:03d}.json"
             (diagrams_dir / code_file).write_text(d.code)
             entry: dict = {
                 "scene_index": scenes.index(d.scene),
@@ -141,9 +137,13 @@ def run(args: argparse.Namespace) -> None:
             }
             if d.graph_data is not None:
                 entry["graph_data"] = d.graph_data
+            if d.slide_start is not None:
+                entry["slide_start"] = d.slide_start
+            if d.slide_end is not None:
+                entry["slide_end"] = d.slide_end
             cache_entries.append(entry)
         diagrams_cache.write_text(json.dumps(cache_entries, indent=2))
-        _console.print(f"[green]✓[/] [bold][4/6][/] Diagram generation complete ({len(diagrams)}/{len(scenes)} succeeded)")
+        _console.print(f"[green]✓[/] [bold][4/6][/] Diagram generation complete ({len(diagrams)} slides across {len(scenes)} scenes)")
 
     # ── Stage 5: Render diagrams ────────────────────────────────────────────
     _console.print("[cyan][5/6] Rendering diagrams...[/]")

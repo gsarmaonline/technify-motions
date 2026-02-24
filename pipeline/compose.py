@@ -64,8 +64,8 @@ def _compose_pip(source_video: str, diagrams: list[Diagram], output_path: str) -
     prev = "[0:v]"
 
     for i, diagram in enumerate(diagrams):
-        start = diagram.scene.start
-        end = diagram.scene.end
+        start = diagram.start
+        end = diagram.end
         # Scale PIP to 40% of screen width, preserve aspect ratio
         pip_label = f"[pip{i}]"
         scale_filter = f"[{i+1}:v]scale=iw*0.4:-1{pip_label}"
@@ -97,7 +97,7 @@ def _compose_pip(source_video: str, diagrams: list[Diagram], output_path: str) -
     )
 
     with _console.status(f"[cyan]PIP compositing {len(diagrams)} diagram(s)...[/]"):
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=7200)
     if result.returncode != 0:
         raise RuntimeError(f"ffmpeg compose failed:\n{result.stderr}")
 
@@ -130,8 +130,8 @@ def _compose_side_by_side(source_video: str, diagrams: list[Diagram], output_pat
     prev = "[base0]"
 
     for i, diagram in enumerate(diagrams):
-        start = diagram.scene.start
-        end = diagram.scene.end
+        start = diagram.start
+        end = diagram.end
 
         # Source shrunk to left half, canvas padded to full 1920 width (right half black)
         filter_parts.append(
@@ -167,13 +167,14 @@ def _compose_side_by_side(source_video: str, diagrams: list[Diagram], output_pat
             "-map", "0:a?",
             "-c:v", "libx264",
             "-c:a", "aac",
-            "-preset", "fast",
+            "-preset", "ultrafast",
+            "-threads", "0",
             output_path,
         ]
     )
 
     with _console.status(f"[cyan]Side-by-side compositing {len(diagrams)} diagram(s)...[/]"):
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=7200)
     if result.returncode != 0:
         raise RuntimeError(f"ffmpeg compose failed:\n{result.stderr}")
 
@@ -246,7 +247,7 @@ def _compose_replace(source_video: str, diagrams: list[Diagram], output_path: st
             ],
             capture_output=True,
             text=True,
-            timeout=600,
+            timeout=7200,
         )
 
     # Clean up temp clips

@@ -1,8 +1,8 @@
 # technify-motions
 
-Automatically generate synced diagram overlays for technical videos and lectures.
+Automatically generate synced visual overlays for technical videos and lectures.
 
-Takes a video or audio file, transcribes it, identifies engineering/technical content, generates diagrams (flowcharts, sequence diagrams, architecture diagrams), and composes them back into the video — perfectly synced to the timestamp where each concept is explained.
+Takes a video or audio file, transcribes it, identifies engineering/technical content, generates animated slides (flowcharts, bullet-point summaries, code snippets), and composes them back into the video — perfectly synced to the timestamp where each concept is explained. Complex scenes get multiple slides, each covering a distinct aspect.
 
 ## Pipeline
 
@@ -14,8 +14,8 @@ Video/Audio → Audio Extraction → Transcription → Technical Scene Detection
 1. **Extract** — strip audio from video, normalize to 16kHz mono WAV (ffmpeg)
 2. **Transcribe** — speech-to-text with timestamps (faster-whisper, runs locally, free)
 3. **Classify** — detect technical segments and group into scenes (Claude API)
-4. **Generate** — the LLM outputs `{nodes, edges}` JSON for every scene type (Claude API)
-5. **Render** — all diagrams are animated via Remotion (nodes spring into view, edges draw themselves)
+4. **Generate** — the LLM outputs 1–3 typed slides per scene: flowcharts, bullet-point summaries, or code snippets (Claude API)
+5. **Render** — all slides are animated via Remotion (nodes spring in, bullets slide in, code reveals line-by-line)
 6. **Compose** — overlay diagram clips on the original video at exact timestamps (ffmpeg)
 
 ## Requirements
@@ -82,13 +82,12 @@ Intermediate files (transcript JSON, scene JSON, diagram code, rendered PNGs) ar
 
 ~$0.20 per 30-minute video (Claude API only — all other tools are free and run locally).
 
-## Supported diagram types
+## Slide types
 
-| Content type | DSL |
-|---|---|
-| Flowcharts, algorithms, decision trees | Remotion (animated) |
-| System/infrastructure architecture | Remotion (animated) |
-| Service interactions, API flows | Remotion (animated) |
-| State machines, lifecycles | Remotion (animated) |
-| Data models, database schemas | Remotion (animated) |
-| Class hierarchies | Remotion (animated) |
+Each technical scene can generate 1–3 slides, each of a different type:
+
+| Slide type | When used | Animation |
+|---|---|---|
+| **Graph** | Flowcharts, architectures, system relationships | Nodes spring into view, edges draw progressively |
+| **Bullets** | Key points, trade-offs, summaries, comparisons | Points slide in from the left one by one |
+| **Code** | Code snippets, SQL, config, CLI commands | Lines reveal top-to-bottom with syntax highlighting |

@@ -1,33 +1,48 @@
-You are generating an animated flowchart to visually accompany a section of a technical video.
+You are generating visual content slides to accompany a section of a technical video.
 
-The speaker said the following:
+The speaker said:
 ---
 {transcript_text}
 ---
 
-Generate a graph with nodes and directed edges that illustrates what is being described.
+Generate 1–3 content slides that together fully illustrate what is being explained.
+Use multiple slides for complex topics; vary slide types to cover different angles.
 
-Output ONLY a valid JSON object with this exact schema — no markdown fences, no explanation:
+Output ONLY a JSON array of slide objects — no markdown fences, no explanation.
+
+Each slide must have a "type" field. Supported types:
+
+1. Graph — flowcharts, architectures, system relationships, data flows:
 {
-  "title": "Brief diagram title (5 words max)",
-  "nodes": [
-    {"id": "A", "label": "Node Label", "shape": "box"},
-    {"id": "B", "label": "Decision?",  "shape": "diamond"}
-  ],
-  "edges": [
-    {"from": "A", "to": "B", "label": "optional edge label"}
-  ]
+  "type": "graph",
+  "title": "Short title (5 words max)",
+  "nodes": [{"id": "A", "label": "Label", "shape": "box"}, ...],
+  "edges": [{"from": "A", "to": "B", "label": "optional"}]
 }
+Shapes: "box" (default), "diamond" (decisions/conditions), "circle" (start/end), "rounded" (processes)
+4–12 nodes; concise labels (5 words max); all edge from/to must match a node id.
 
-Shape options:
-- "box"      — default rectangular node
-- "diamond"  — decisions / branches / conditions
-- "circle"   — start / end / terminal points
-- "rounded"  — processes / actions / steps
+2. Bullets — key points, trade-offs, summaries, comparisons, pros/cons:
+{
+  "type": "bullets",
+  "title": "Short title (5 words max)",
+  "points": ["First key point.", "Second key point.", "Third key point."]
+}
+3–6 points; each 1 sentence max; be specific and technical.
 
-Rules:
-- Node labels: max 5 words, concise
-- Edge labels: optional, 1-4 words only
-- 4–12 nodes total; omit trivial intermediate nodes
-- Only illustrate what the speaker explicitly described
-- All "from"/"to" values must match an existing node "id"
+3. Code — code snippets, SQL, config, pseudocode, CLI commands:
+{
+  "type": "code",
+  "title": "Short title",
+  "language": "python",
+  "code": "# actual code here"
+}
+Language: one of "python", "sql", "bash", "javascript", "go", "yaml", "text"
+Keep code concise (≤20 lines); include only what the speaker described.
+
+Guidelines:
+- Use 1 slide for simple topics, 2–3 for complex ones with distinct aspects
+- A graph + bullets pairing works well for "what it does" + "why/trade-offs"
+- A code slide adds value when the speaker shows or describes concrete syntax
+- Only include content the speaker explicitly discussed
+- Be technical and precise — this audience is engineers
