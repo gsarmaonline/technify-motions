@@ -1,9 +1,4 @@
-"""Render diagram code to PNG, then to a duration-matched video clip.
-
-Flowchart diagrams with parsed graph data are rendered via Remotion for a live
-"drawing" animation.  All other diagram types fall back to the original
-PNG → ffmpeg static-video path.
-"""
+"""Render slides to duration-matched MP4 clips via Remotion."""
 
 import json
 import shutil
@@ -45,12 +40,15 @@ def render_diagrams(diagrams: list[Diagram], output_dir: str, max_workers: int =
 
         def render_one(args: tuple) -> None:
             i, diagram = args
-            stem = f"diagram_{i:03d}_{diagram.scene.start:.1f}s"
+            stem = f"diagram_{i:03d}_{diagram.start:.1f}s"
             png_path = output_dir / f"{stem}.png"
             mp4_path = output_dir / f"{stem}.mp4"
 
             if use_cache and mp4_path.exists():
-                should_use_remotion = bool(diagram.graph_data and diagram.graph_data.get("nodes"))
+                remotion_types = {"graph", "bullets", "code"}
+                should_use_remotion = bool(
+                    diagram.graph_data and diagram.graph_data.get("type") in remotion_types
+                )
                 # Remotion renders have no accompanying PNG; static renders do.
                 # If a PNG exists alongside the mp4, it was rendered statically and
                 # should be re-rendered with Remotion now that graph_data is available.

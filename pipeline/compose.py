@@ -1,5 +1,6 @@
 """Compose the final video by overlaying diagram clips at their timestamps."""
 
+import json
 import subprocess
 import os
 from pathlib import Path
@@ -105,78 +106,100 @@ def _compose_pip(source_video: str, diagrams: list[Diagram], output_path: str) -
     return output_path
 
 
+def _source_duration(source_video: str) -> float:
+    """Return the duration of a video file in seconds via ffprobe."""
+    result = subprocess.run(
+        ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_format", source_video],
+        capture_output=True, text=True, timeout=30,
+    )
+    return float(json.loads(result.stdout)["format"]["duration"])
+
+
 def _compose_side_by_side(source_video: str, diagrams: list[Diagram], output_path: str) -> str:
     """
-    Dynamic side-by-side: source is full-width by default; during each diagram
-    window it shrinks to the left 960px and the diagram fills the right 960px.
+    Segment-based side-by-side: gaps between diagrams are stream-copied (fast),
+    only diagram windows are composited and re-encoded (source left, diagram right).
     """
-    n = len(diagrams)
-    inputs = ["-i", source_video]
+    diagrams = sorted(diagrams, key=lambda d: d.start)
+    source_dur = _source_duration(source_video)
+
+    # Build timeline: list of (t_start, t_end, diagram_or_None)
+    segments: list[tuple[float, float, Diagram | None]] = []
+    cursor = 0.0
     for d in diagrams:
-        inputs += ["-i", d.video_path]
+        if d.start > cursor + 0.05:
+            segments.append((cursor, d.start, None))
+        segments.append((d.start, d.end, d))
+        cursor = d.end
+    if cursor < source_dur - 0.05:
+        segments.append((cursor, source_dur, None))
 
-    filter_parts = []
+    clip_paths: list[str] = []
+    concat_path = output_path.replace(".mp4", "_concat.txt")
 
-    # Split source into: one full-width base + one half-width copy per diagram
-    split_outs = "[fullsrc]" + "".join(f"[src{i}]" for i in range(n))
-    filter_parts.append(f"[0:v]split={n + 1}{split_outs}")
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        MofNCompleteColumn(),
+    ) as progress:
+        task = progress.add_task("[cyan]Compositing segments...", total=len(segments))
 
-    # Full-width base (shown outside diagram windows)
-    filter_parts.append(
-        "[fullsrc]scale=1920:1080:force_original_aspect_ratio=decrease,"
-        "pad=1920:1080:(ow-iw)/2:(oh-ih)/2:color=black[base0]"
-    )
+        for j, (t_start, t_end, diagram) in enumerate(segments):
+            clip = output_path.replace(".mp4", f"_seg{j:03d}.mp4")
+            clip_paths.append(clip)
 
-    prev = "[base0]"
+            if diagram is None:
+                # No diagram — stream copy (no re-encode, very fast)
+                progress.update(task, description=f"[cyan]Copying segment {j+1}/{len(segments)} ({t_start:.0f}s–{t_end:.0f}s)")
+                subprocess.run(
+                    ["ffmpeg", "-y",
+                     "-ss", str(t_start), "-to", str(t_end),
+                     "-i", source_video,
+                     "-c", "copy", clip],
+                    capture_output=True, check=True, timeout=600,
+                )
+            else:
+                # Diagram window — composite source (left) + diagram (right)
+                progress.update(task, description=f"[cyan]Compositing segment {j+1}/{len(segments)} ({t_start:.0f}s–{t_end:.0f}s)")
+                filter_complex = (
+                    "[0:v]scale=960:1080:force_original_aspect_ratio=decrease,"
+                    "pad=960:1080:(ow-iw)/2:(oh-ih)/2:color=black,"
+                    "pad=1920:1080:0:0:color=black[left];"
+                    "[1:v]scale=960:1080:force_original_aspect_ratio=decrease,"
+                    "pad=960:1080:(ow-iw)/2:(oh-ih)/2:color=white[right];"
+                    "[left][right]overlay=960:0[out]"
+                )
+                subprocess.run(
+                    ["ffmpeg", "-y",
+                     "-ss", str(t_start), "-to", str(t_end), "-i", source_video,
+                     "-i", diagram.video_path,
+                     "-filter_complex", filter_complex,
+                     "-map", "[out]", "-map", "0:a?",
+                     "-c:v", "libx264", "-preset", "ultrafast", "-threads", "0",
+                     "-c:a", "aac", clip],
+                    capture_output=True, check=True, timeout=600,
+                )
+            progress.advance(task)
 
-    for i, diagram in enumerate(diagrams):
-        start = diagram.start
-        end = diagram.end
+    # Write concat list and stitch all segments together
+    with open(concat_path, "w") as f:
+        for cp in clip_paths:
+            f.write(f"file '{os.path.abspath(cp)}'\n")
 
-        # Source shrunk to left half, canvas padded to full 1920 width (right half black)
-        filter_parts.append(
-            f"[src{i}]scale=960:1080:force_original_aspect_ratio=decrease,"
-            f"pad=960:1080:(ow-iw)/2:(oh-ih)/2:color=black,"
-            f"pad=1920:1080:0:0:color=black[leftpanel{i}]"
+    with _console.status("[cyan]Stitching segments into final video...[/]"):
+        result = subprocess.run(
+            ["ffmpeg", "-y", "-f", "concat", "-safe", "0",
+             "-i", concat_path, "-c", "copy", output_path],
+            capture_output=True, text=True, timeout=600,
         )
 
-        # Diagram scaled to right half
-        filter_parts.append(
-            f"[{i+1}:v]scale=960:1080:force_original_aspect_ratio=decrease,"
-            f"pad=960:1080:(ow-iw)/2:(oh-ih)/2:color=white[d{i}]"
-        )
+    for cp in clip_paths:
+        Path(cp).unlink(missing_ok=True)
+    Path(concat_path).unlink(missing_ok=True)
 
-        # Combine: diagram overlaid on the right half of the left-panel
-        filter_parts.append(f"[leftpanel{i}][d{i}]overlay=960:0[panel{i}]")
-
-        # Swap full-width base for the split panel only during this scene window
-        out_label = f"[v{i}]" if i < n - 1 else "[vout]"
-        filter_parts.append(
-            f"{prev}[panel{i}]overlay=0:0:enable='between(t,{start},{end})'{out_label}"
-        )
-        prev = f"[v{i}]"
-
-    filter_complex = ";".join(filter_parts)
-
-    cmd = (
-        ["ffmpeg", "-y"]
-        + inputs
-        + [
-            "-filter_complex", filter_complex,
-            "-map", "[vout]",
-            "-map", "0:a?",
-            "-c:v", "libx264",
-            "-c:a", "aac",
-            "-preset", "ultrafast",
-            "-threads", "0",
-            output_path,
-        ]
-    )
-
-    with _console.status(f"[cyan]Side-by-side compositing {len(diagrams)} diagram(s)...[/]"):
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=7200)
     if result.returncode != 0:
-        raise RuntimeError(f"ffmpeg compose failed:\n{result.stderr}")
+        raise RuntimeError(f"ffmpeg concat failed:\n{result.stderr}")
 
     print(f"[compose] Output saved to {output_path}")
     return output_path
