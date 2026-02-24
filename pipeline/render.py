@@ -4,6 +4,8 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, MofNCompleteColumn
+
 from .models import Diagram
 
 
@@ -15,32 +17,44 @@ def render_diagrams(diagrams: list[Diagram], output_dir: str) -> list[Diagram]:
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    for i, diagram in enumerate(diagrams):
-        stem = f"diagram_{i:03d}_{diagram.scene.start:.1f}s"
-        png_path = output_dir / f"{stem}.png"
-        mp4_path = output_dir / f"{stem}.mp4"
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        MofNCompleteColumn(),
+    ) as progress:
+        task = progress.add_task("[cyan]Rendering diagrams...", total=len(diagrams))
+        for i, diagram in enumerate(diagrams):
+            stem = f"diagram_{i:03d}_{diagram.scene.start:.1f}s"
+            png_path = output_dir / f"{stem}.png"
+            mp4_path = output_dir / f"{stem}.mp4"
 
-        print(f"[render] Rendering diagram {i+1}/{len(diagrams)} ({diagram.diagram_dsl})...")
+            progress.update(
+                task,
+                description=f"[cyan]Rendering diagram {i + 1}/{len(diagrams)} ({diagram.diagram_dsl})",
+            )
 
-        if diagram.diagram_dsl == "mermaid":
-            ok = _render_mermaid(diagram.code, str(png_path))
-        elif diagram.diagram_dsl == "d2":
-            ok = _render_d2(diagram.code, str(png_path))
-        else:
-            ok = False
+            if diagram.diagram_dsl == "mermaid":
+                ok = _render_mermaid(diagram.code, str(png_path))
+            elif diagram.diagram_dsl == "d2":
+                ok = _render_d2(diagram.code, str(png_path))
+            else:
+                ok = False
 
-        if not ok:
-            print(f"[render] Failed to render diagram {i+1}, skipping")
-            continue
+            if not ok:
+                print(f"[render] Failed to render diagram {i+1}, skipping")
+                progress.advance(task)
+                continue
 
-        diagram.rendered_path = str(png_path)
+            diagram.rendered_path = str(png_path)
 
-        # Convert PNG to a video clip matching the scene duration
-        duration = diagram.scene.duration
-        ok = _png_to_video(str(png_path), str(mp4_path), duration)
-        if ok:
-            diagram.video_path = str(mp4_path)
-            print(f"[render] Diagram {i+1} rendered to {mp4_path} ({duration:.1f}s)")
+            # Convert PNG to a video clip matching the scene duration
+            duration = diagram.scene.duration
+            ok = _png_to_video(str(png_path), str(mp4_path), duration)
+            if ok:
+                diagram.video_path = str(mp4_path)
+
+            progress.advance(task)
 
     return diagrams
 

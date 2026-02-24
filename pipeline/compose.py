@@ -4,7 +4,12 @@ import subprocess
 import os
 from pathlib import Path
 
+from rich.console import Console
+from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, MofNCompleteColumn
+
 from .models import Diagram
+
+_console = Console()
 
 
 def compose_video(
@@ -91,8 +96,8 @@ def _compose_pip(source_video: str, diagrams: list[Diagram], output_path: str) -
         ]
     )
 
-    print(f"[compose] PIP compositing {len(diagrams)} diagrams...")
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+    with _console.status(f"[cyan]PIP compositing {len(diagrams)} diagram(s)...[/]"):
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
     if result.returncode != 0:
         raise RuntimeError(f"ffmpeg compose failed:\n{result.stderr}")
 
@@ -151,8 +156,8 @@ def _compose_side_by_side(source_video: str, diagrams: list[Diagram], output_pat
         ]
     )
 
-    print(f"[compose] Side-by-side compositing {len(diagrams)} diagrams...")
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+    with _console.status(f"[cyan]Side-by-side compositing {len(diagrams)} diagram(s)...[/]"):
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
     if result.returncode != 0:
         raise RuntimeError(f"ffmpeg compose failed:\n{result.stderr}")
 
@@ -180,43 +185,53 @@ def _compose_replace(source_video: str, diagrams: list[Diagram], output_path: st
             continue
         segments.append((start, end, path))
 
-    # Generate concat inputs using trim
+    # Extract each segment clip with a progress bar
     concat_list_path = output_path.replace(".mp4", "_concat.txt")
     clip_paths = []
 
-    for j, (start, end, path) in enumerate(segments):
-        clip_path = output_path.replace(".mp4", f"_clip{j:03d}.mp4")
-        subprocess.run(
-            [
-                "ffmpeg", "-y",
-                "-ss", str(start), "-to", str(end),
-                "-i", path,
-                "-c:v", "libx264", "-c:a", "aac",
-                "-pix_fmt", "yuv420p",
-                clip_path,
-            ],
-            capture_output=True,
-            check=True,
-            timeout=120,
-        )
-        clip_paths.append(clip_path)
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        MofNCompleteColumn(),
+    ) as progress:
+        task = progress.add_task("[cyan]Extracting clips...", total=len(segments))
+        for j, (start, end, path) in enumerate(segments):
+            clip_path = output_path.replace(".mp4", f"_clip{j:03d}.mp4")
+            progress.update(task, description=f"[cyan]Clip {j + 1}/{len(segments)} ({start:.1f}s–{end:.1f}s)")
+            subprocess.run(
+                [
+                    "ffmpeg", "-y",
+                    "-ss", str(start), "-to", str(end),
+                    "-i", path,
+                    "-c:v", "libx264", "-c:a", "aac",
+                    "-pix_fmt", "yuv420p",
+                    clip_path,
+                ],
+                capture_output=True,
+                check=True,
+                timeout=120,
+            )
+            clip_paths.append(clip_path)
+            progress.advance(task)
 
     with open(concat_list_path, "w") as f:
         for cp in clip_paths:
             f.write(f"file '{os.path.abspath(cp)}'\n")
 
-    result = subprocess.run(
-        [
-            "ffmpeg", "-y",
-            "-f", "concat", "-safe", "0",
-            "-i", concat_list_path,
-            "-c", "copy",
-            output_path,
-        ],
-        capture_output=True,
-        text=True,
-        timeout=600,
-    )
+    with _console.status("[cyan]Concatenating clips into final video...[/]"):
+        result = subprocess.run(
+            [
+                "ffmpeg", "-y",
+                "-f", "concat", "-safe", "0",
+                "-i", concat_list_path,
+                "-c", "copy",
+                output_path,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=600,
+        )
 
     # Clean up temp clips
     for cp in clip_paths:

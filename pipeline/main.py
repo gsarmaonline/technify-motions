@@ -6,6 +6,9 @@ import os
 import sys
 from pathlib import Path
 
+from rich.console import Console
+from rich.panel import Panel
+
 from .extract import extract_audio
 from .transcribe import transcribe, segments_to_text
 from .classify import classify_scenes
@@ -13,15 +16,17 @@ from .generate import generate_diagrams
 from .render import render_diagrams
 from .compose import compose_video
 
+_console = Console()
+
 
 def run(args: argparse.Namespace) -> None:
     input_path = Path(args.input)
     if not input_path.exists():
-        print(f"Error: input file not found: {input_path}", file=sys.stderr)
+        _console.print(f"[red]Error:[/] input file not found: {input_path}")
         sys.exit(1)
 
     if not os.environ.get("ANTHROPIC_API_KEY"):
-        print("Error: ANTHROPIC_API_KEY environment variable not set", file=sys.stderr)
+        _console.print("[red]Error:[/] ANTHROPIC_API_KEY environment variable not set")
         sys.exit(1)
 
     work_dir = Path(args.work_dir)
@@ -29,67 +34,73 @@ def run(args: argparse.Namespace) -> None:
 
     output_path = args.output or str(input_path.parent / f"{input_path.stem}_technified.mp4")
 
-    print(f"\n=== technify-motions pipeline ===")
-    print(f"Input:   {input_path}")
-    print(f"Output:  {output_path}")
-    print(f"Mode:    {args.mode}")
-    print(f"Work dir: {work_dir}\n")
+    _console.print(Panel.fit(
+        f"[bold]Input:[/]    {input_path}\n"
+        f"[bold]Output:[/]   {output_path}\n"
+        f"[bold]Mode:[/]     {args.mode}\n"
+        f"[bold]Work dir:[/] {work_dir}",
+        title="[bold cyan]technify-motions pipeline[/]",
+    ))
+    _console.print()
 
     # ── Stage 1: Extract audio ──────────────────────────────────────────────
-    print("── Stage 1: Audio extraction ──")
-    audio_path = extract_audio(str(input_path), str(work_dir / "audio"))
+    with _console.status("[cyan][1/6] Extracting audio...[/]"):
+        audio_path = extract_audio(str(input_path), str(work_dir / "audio"))
+    _console.print("[green]✓[/] [bold][1/6][/] Audio extraction complete")
 
     # ── Stage 2: Transcribe ─────────────────────────────────────────────────
-    print("\n── Stage 2: Transcription ──")
     transcript_cache = work_dir / "transcript.json"
 
     if args.use_cache and transcript_cache.exists():
-        print(f"[transcribe] Loading cached transcript from {transcript_cache}")
-        from .models import TranscriptSegment
-        data = json.loads(transcript_cache.read_text())
-        segments = [TranscriptSegment(**s) for s in data]
+        with _console.status("[cyan][2/6] Loading cached transcript...[/]"):
+            from .models import TranscriptSegment
+            data = json.loads(transcript_cache.read_text())
+            segments = [TranscriptSegment(**s) for s in data]
+        _console.print(f"[green]✓[/] [bold][2/6][/] Transcript loaded from cache ({len(segments)} segments)")
     else:
+        _console.print("[cyan][2/6] Transcribing audio...[/]")
         segments = transcribe(audio_path, model_size=args.whisper_model, language=args.language)
         transcript_cache.write_text(json.dumps([vars(s) for s in segments], indent=2))
-        print(f"[transcribe] Transcript cached to {transcript_cache}")
+        _console.print(f"[green]✓[/] [bold][2/6][/] Transcription complete ({len(segments)} segments)")
 
     if args.dump_transcript:
-        print("\n── Transcript ──")
-        print(segments_to_text(segments))
+        _console.print("\n── Transcript ──")
+        _console.print(segments_to_text(segments))
         if args.dump_transcript == "only":
             return
 
     # ── Stage 3: Classify technical scenes ─────────────────────────────────
-    print("\n── Stage 3: Technical scene classification ──")
     scenes_cache = work_dir / "scenes.json"
 
     if args.use_cache and scenes_cache.exists():
-        print(f"[classify] Loading cached scenes from {scenes_cache}")
-        from .models import TechnicalScene, TranscriptSegment
-        raw_scenes = json.loads(scenes_cache.read_text())
-        scenes = []
-        for rs in raw_scenes:
-            scene_segs = [TranscriptSegment(**s) for s in rs.pop("segments")]
-            scenes.append(TechnicalScene(segments=scene_segs, **rs))
+        with _console.status("[cyan][3/6] Loading cached scenes...[/]"):
+            from .models import TechnicalScene, TranscriptSegment
+            raw_scenes = json.loads(scenes_cache.read_text())
+            scenes = []
+            for rs in raw_scenes:
+                scene_segs = [TranscriptSegment(**s) for s in rs.pop("segments")]
+                scenes.append(TechnicalScene(segments=scene_segs, **rs))
+        _console.print(f"[green]✓[/] [bold][3/6][/] Scenes loaded from cache ({len(scenes)} scenes)")
     else:
-        scenes = classify_scenes(segments)
-        serializable = []
-        for sc in scenes:
-            d = {"start": sc.start, "end": sc.end, "content_type": sc.content_type,
-                 "description": sc.description, "segments": [vars(s) for s in sc.segments]}
-            serializable.append(d)
-        scenes_cache.write_text(json.dumps(serializable, indent=2))
+        with _console.status("[cyan][3/6] Classifying technical scenes...[/]"):
+            scenes = classify_scenes(segments)
+            serializable = []
+            for sc in scenes:
+                d = {"start": sc.start, "end": sc.end, "content_type": sc.content_type,
+                     "description": sc.description, "segments": [vars(s) for s in sc.segments]}
+                serializable.append(d)
+            scenes_cache.write_text(json.dumps(serializable, indent=2))
+        _console.print(f"[green]✓[/] [bold][3/6][/] Scene classification complete ({len(scenes)} scenes)")
 
-    print(f"\nTechnical scenes found: {len(scenes)}")
     for sc in scenes:
-        print(f"  [{sc.start:.1f}s - {sc.end:.1f}s] {sc.content_type}: {sc.description}")
+        _console.print(f"  [dim][{sc.start:.1f}s - {sc.end:.1f}s] {sc.content_type}: {sc.description}[/]")
 
     if not scenes:
-        print("\nNo technical scenes detected — nothing to visualize.")
+        _console.print("\n[yellow]No technical scenes detected — nothing to visualize.[/]")
         return
 
     # ── Stage 4: Generate diagram code ─────────────────────────────────────
-    print("\n── Stage 4: Diagram code generation ──")
+    _console.print("[cyan][4/6] Generating diagram code...[/]")
     diagrams = generate_diagrams(scenes)
 
     # Save generated code for inspection
@@ -99,28 +110,29 @@ def run(args: argparse.Namespace) -> None:
         ext = "mmd" if d.diagram_dsl == "mermaid" else "d2"
         code_path = diagrams_dir / f"diagram_{i:03d}.{ext}"
         code_path.write_text(d.code)
+    _console.print(f"[green]✓[/] [bold][4/6][/] Diagram generation complete ({len(diagrams)}/{len(scenes)} succeeded)")
 
     # ── Stage 5: Render diagrams ────────────────────────────────────────────
-    print("\n── Stage 5: Rendering diagrams ──")
+    _console.print("[cyan][5/6] Rendering diagrams...[/]")
     diagrams = render_diagrams(diagrams, str(diagrams_dir))
-
     rendered = [d for d in diagrams if d.video_path]
-    print(f"Successfully rendered: {len(rendered)}/{len(diagrams)}")
+    _console.print(f"[green]✓[/] [bold][5/6][/] Rendering complete ({len(rendered)}/{len(diagrams)} succeeded)")
 
     if not rendered:
-        print("\nNo diagrams rendered successfully. Check that mmdc/d2 are installed.")
+        _console.print("\n[yellow]No diagrams rendered successfully. Check that mmdc/d2 are installed.[/]")
         return
 
     # ── Stage 6: Compose final video ────────────────────────────────────────
-    print("\n── Stage 6: Video composition ──")
+    _console.print("[cyan][6/6] Composing final video...[/]")
     compose_video(
         source_video=str(input_path),
         diagrams=rendered,
         output_path=output_path,
         mode=args.mode,
     )
+    _console.print(f"[green]✓[/] [bold][6/6][/] Video composition complete")
 
-    print(f"\n✓ Done! Output: {output_path}")
+    _console.print(f"\n[bold green]✓ Done![/] Output: {output_path}")
 
 
 def main() -> None:
